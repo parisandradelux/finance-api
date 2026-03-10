@@ -18,7 +18,9 @@ class TransactionController extends Controller
             ->with('category');
 
         if ($request->has('type')) {
-            $query->where('type', $request->type);
+            $query->whereHas('category', function ($q) use ($request) {
+                $q->where('type', $request->type);
+            });
         }
 
         if ($request->has('category_id')) {
@@ -43,20 +45,22 @@ class TransactionController extends Controller
     {
         $userId = $request->user()->id;
 
-        $summary = Transaction::where('user_id', $userId)
+        $summary = Transaction::where('transactions.user_id', $userId)
+            ->join('categories', 'transactions.category_id', '=', 'categories.id')
             ->selectRaw('
-                type,
-                COUNT(*) as total_transactions,
-                SUM(amount) as total_amount,
-                AVG(amount) as avg_amount
-            ')
-            ->groupBy('type')
+            categories.type,
+            COUNT(*) as total_transactions,
+            SUM(transactions.amount) as total_amount,
+            AVG(transactions.amount) as avg_amount
+        ')
+            ->groupBy('categories.type')
             ->get();
 
-        $balance = Transaction::where('user_id', $userId)
+        $balance = Transaction::where('transactions.user_id', $userId)
+            ->join('categories', 'transactions.category_id', '=', 'categories.id')
             ->selectRaw("
-                SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as balance
-            ")
+            SUM(CASE WHEN categories.type = 'income' THEN transactions.amount ELSE -transactions.amount END) as balance
+        ")
             ->value('balance');
 
         return response()->json([
@@ -73,7 +77,6 @@ class TransactionController extends Controller
         $validated = $request->validate([
             'category_id' => 'required|exists:categories,id',
             'amount' => 'required|numeric|min:0.01',
-            'type' => 'required|in:income,expense',
             'description' => 'nullable|string|max:500',
             'transaction_date' => 'required|date',
         ]);
@@ -98,14 +101,14 @@ class TransactionController extends Controller
      */
     public function show(Request $request, Transaction $transaction)
     {
-        
-    if ($transaction->user_id !== $request->user()->id) {
-        return response()->json(['message' => 'No autorizado'], 403);
-    }
 
-    return response()->json(
-        $transaction->load('category')
-    );
+        if ($transaction->user_id !== $request->user()->id) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
+        return response()->json(
+            $transaction->load('category')
+        );
     }
 
     /**
@@ -120,7 +123,6 @@ class TransactionController extends Controller
         $validated = $request->validate([
             'category_id' => 'sometimes|exists:categories,id',
             'amount' => 'sometimes|numeric|min:0.01',
-            'type' => 'sometimes|in:income,expense',
             'description' => 'nullable|string|max:500',
             'transaction_date' => 'sometimes|date',
         ]);
